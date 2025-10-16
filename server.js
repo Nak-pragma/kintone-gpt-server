@@ -1,38 +1,44 @@
 import express from "express";
-import axios from "axios";
-import cors from "cors";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cors());
 
-app.post("/api/chatgpt", async (req, res) => {
+// ✅ ChatGPT呼び出し用エンドポイント
+app.post("/chat", async (req, res) => {
   try {
-    const { prompt } = req.body;
+    const { project_id, messages } = req.body;
 
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "あなたは優秀な議事録要約者です。" },
-          { role: "user", content: prompt }
-        ]
+    const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+      body: JSON.stringify({
+        model: "gpt-5",
+        messages: [
+          { role: "system", content: `あなたは製造業R&D支援AIノア。Project:${project_id}` },
+          ...messages
+        ]
+      }),
+    });
 
-    res.json({ summary: response.data.choices[0].message.content });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "AI要約の生成に失敗しました。" });
+    const result = await completion.json();
+    res.json({ answer: result.choices[0].message.content });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running on ${PORT}`));
+// ✅ Render確認用のテストエンドポイント（動作テスト）
+app.get("/", (req, res) => {
+  res.send("✅ ChatGPT relay server is running!");
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
