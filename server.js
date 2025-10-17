@@ -5,14 +5,20 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 
-// 🚀 追加：CORS対応
+// ✅ CORSを最上部に配置（すべてのミドルウェアより前）
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
   next();
 });
+
+app.use(express.json());
+
 
 /* ==========================================================
  * ① ChatGPT：プロジェクトチャット用
