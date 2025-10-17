@@ -6,12 +6,15 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORSを最上部に配置（すべてのミドルウェアより前）
+/* ==========================================================
+ * ✅ 1. CORS設定（プリフライト対応）
+ * ========================================================== */
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") {
+    // ⚠️ Kintoneのプリフライト要求はここで完結させる！
     return res.sendStatus(200);
   }
   next();
@@ -127,5 +130,5 @@ if (process.env.NODE_ENV !== "production") {
 /* ==========================================================
  * ⑤ ポート設定
  * ========================================================== */
-const port = process.env.PORT || 10000;
+const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
