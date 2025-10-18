@@ -94,8 +94,11 @@ app.post("/summary", async (req, res) => {
  * ③ Webサイト要約API（URL指定）
  * ========================================================== */
 app.post("/site-summary", async (req, res) => {
+  console.log("📩 POST /site-summary reached");
   try {
     const { url } = req.body;
+    console.log("URL received:", url);
+
     if (!url) return res.status(400).json({ error: "Missing url" });
 
     const completion = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -113,13 +116,17 @@ app.post("/site-summary", async (req, res) => {
       })
     });
 
+    console.log("✅ OpenAI API responded (status):", completion.status);
     const result = await completion.json();
+    console.log("🧩 OpenAI Response Body:", result);
+
     res.json({ summary: result.choices?.[0]?.message?.content || "要約結果が取得できませんでした。" });
   } catch (error) {
-    console.error("Site Summary Error:", error);
-    res.status(500).json({ error: "Site Summary API failed" });
+    console.error("❌ Site Summary Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
+
 
 /* ==========================================================
  * ④ 開発環境専用の確認ルート（Render正常稼働確認用）
