@@ -125,6 +125,8 @@ app.post("/site-summary", async (req, res) => {
     console.error("❌ Site Summary Error:", error);
     res.status(500).json({ error: error.message });
   }
+  console.log("🧩 Summary Text:", messageContent); // ← デバッグ出力追加
+res.json({ summary: messageContent });
 });
 
 
