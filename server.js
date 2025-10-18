@@ -17,25 +17,67 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") {
-    // ⚠️ Kintoneのプリフライト要求はここで完結させる！
     return res.sendStatus(200);
   }
   next();
 });
 
-
-
-
 /* ==========================================================
- * ① ChatGPT：プロジェクトチャット用
+ * ✅ 2. /project-chat : プロジェクト文脈＋資料でのAI議論API
  * ========================================================== */
-app.post("/chat", async (req, res) => {
+app.post("/project-chat", async (req, res) => {
   try {
-    const { project_id, messages } = req.body;
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: "Invalid messages array" });
+    const { projectId, documentId, message } = req.body;
+    if (!projectId || !documentId || !message) {
+      return res.status(400).json({ error: "Missing projectId, documentId, or message" });
     }
 
+    // --- 環境変数 ---
+    const KINTONE_DOMAIN = process.env.KINTONE_DOMAIN;
+    const PROJECT_APP_ID = process.env.KINTONE_PROJECT_APP_ID;
+    const DOCUMENT_APP_ID = process.env.KINTONE_DOCUMENT_APP_ID;
+    const PROJECT_API_TOKEN = process.env.KINTONE_PROJECT_TOKEN;
+    const DOCUMENT_API_TOKEN = process.env.KINTONE_DOCUMENT_TOKEN;
+
+    // --- 共通関数：Kintoneレコード取得 ---
+    const getKintoneRecord = async (appId, apiToken, query) => {
+      const url = `https://${KINTONE_DOMAIN}/k/v1/records.json?app=${appId}&query=${encodeURIComponent(query)}`;
+      const response = await fetch(url, {
+        headers: { "X-Cybozu-API-Token": apiToken }
+      });
+      const data = await response.json();
+      if (!data.records || data.records.length === 0) return null;
+      return data.records[0];
+    };
+
+    // --- プロジェクト情報 ---
+    const projectRecord = await getKintoneRecord(PROJECT_APP_ID, PROJECT_API_TOKEN, `projectID = "${projectId}"`);
+    if (!projectRecord) return res.status(404).json({ error: "Project not found" });
+
+    // --- 資料情報 ---
+    const documentRecord = await getKintoneRecord(DOCUMENT_APP_ID, DOCUMENT_API_TOKEN, `documentID = "${documentId}"`);
+    if (!documentRecord) return res.status(404).json({ error: "Document not found" });
+
+    // --- GPTへ渡すプロンプト作成 ---
+    const contextPrompt = `
+あなたは製造業R&D支援のAIアシスタント「ノア」です。
+次のプロジェクト情報と資料をもとに、ユーザーとの議論を継続してください。
+出典データの引用は不要です。
+
+【プロジェクト情報】
+目的: ${projectRecord.目的?.value || "未設定"}
+目標: ${projectRecord.目標?.value || "未設定"}
+スコープ: ${projectRecord.スコープ?.value || "未設定"}
+
+【資料情報】
+タイトル: ${documentRecord.タイトル?.value || "未設定"}
+概要: ${documentRecord.概要?.value || "未設定"}
+
+ユーザーの質問やコメント:
+${message}
+`;
+
+    // --- GPT呼び出し ---
     const completion = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -43,24 +85,26 @@ app.post("/chat", async (req, res) => {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: "gpt-5",
+        model: "gpt-5", // 現行環境と合わせる
         messages: [
-          { role: "system", content: `あなたは製造業支援AI「ノア」です。ProjectID:${project_id}` },
-          ...messages
+          { role: "system", content: "あなたは製造業R&Dプロジェクト支援AI「ノア」です。誠実に、簡潔に答えてください。" },
+          { role: "user", content: contextPrompt }
         ]
       })
     });
 
     const result = await completion.json();
-    res.json({ answer: result.choices[0].message.content });
+    const reply = result?.choices?.[0]?.message?.content || "（返答を生成できませんでした）";
+
+    res.json({ reply });
   } catch (error) {
-    console.error("Chat API Error:", error);
-    res.status(500).json({ error: "Chat API failed" });
+    console.error("❌ /project-chat Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 /* ==========================================================
- * ② 議事録要約API
+ * ② 議事録要約API（既存）
  * ========================================================== */
 app.post("/summary", async (req, res) => {
   try {
@@ -95,9 +139,8 @@ app.post("/summary", async (req, res) => {
   }
 });
 
-
 /* ==========================================================
- * ③ Webサイト要約API（URL指定）
+ * ③ Webサイト要約API（既存）
  * ========================================================== */
 app.post("/site-summary", async (req, res) => {
   console.log("📩 POST /site-summary reached");
@@ -114,7 +157,7 @@ app.post("/site-summary", async (req, res) => {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // ← 安定版（またはgpt-5でもOK）
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: "あなたはWebサイトの内容を日本語で簡潔に要約するAIです。" },
           { role: "user", content: `次のサイトを要約してください：${url}` }
@@ -125,13 +168,8 @@ app.post("/site-summary", async (req, res) => {
     console.log("✅ OpenAI API responded (status):", completion.status);
     const result = await completion.json();
 
-    // 🧩 ここで messageContent を先に定義
     const messageContent = result?.choices?.[0]?.message?.content || "要約結果が取得できませんでした。";
-
-    // 🧩 ここで出力
     console.log("🧩 Summary Text:", messageContent);
-
-    // ✅ Kintoneへ返却
     res.json({ summary: messageContent });
   } catch (error) {
     console.error("❌ Site Summary Error:", error);
@@ -139,10 +177,8 @@ app.post("/site-summary", async (req, res) => {
   }
 });
 
-
-
 /* ==========================================================
- * ④ 開発環境専用の確認ルート（Render正常稼働確認用）
+ * ④ 動作確認ルート
  * ========================================================== */
 if (process.env.NODE_ENV !== "production") {
   app.get("/", (req, res) => res.send("✅ Pragma GPT Relay Server running (dev mode)"));
