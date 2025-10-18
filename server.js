@@ -108,7 +108,7 @@ app.post("/site-summary", async (req, res) => {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: "gpt-5",
+        model: "gpt-4o-mini", // ← 安定版（またはgpt-5でもOK）
         messages: [
           { role: "system", content: "あなたはWebサイトの内容を日本語で簡潔に要約するAIです。" },
           { role: "user", content: `次のサイトを要約してください：${url}` }
@@ -118,16 +118,21 @@ app.post("/site-summary", async (req, res) => {
 
     console.log("✅ OpenAI API responded (status):", completion.status);
     const result = await completion.json();
-    console.log("🧩 OpenAI Response Body:", result);
 
-    res.json({ summary: result.choices?.[0]?.message?.content || "要約結果が取得できませんでした。" });
+    // 🧩 ここで messageContent を先に定義
+    const messageContent = result?.choices?.[0]?.message?.content || "要約結果が取得できませんでした。";
+
+    // 🧩 ここで出力
+    console.log("🧩 Summary Text:", messageContent);
+
+    // ✅ Kintoneへ返却
+    res.json({ summary: messageContent });
   } catch (error) {
     console.error("❌ Site Summary Error:", error);
     res.status(500).json({ error: error.message });
   }
-  console.log("🧩 Summary Text:", messageContent); // ← デバッグ出力追加
-res.json({ summary: messageContent });
 });
+
 
 
 /* ==========================================================
