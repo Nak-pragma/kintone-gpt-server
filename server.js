@@ -6,6 +6,9 @@ dotenv.config();
 
 const app = express();
 
+/* 1️⃣ JSONボディを最初に処理 */
+app.use(express.json({ limit: "2mb" }));
+
 /* ==========================================================
  * ✅ 1. CORS設定（プリフライト対応）
  * ========================================================== */
@@ -20,7 +23,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+
 
 
 /* ==========================================================
@@ -91,35 +94,12 @@ app.post("/summary", async (req, res) => {
  * ③ Webサイト要約API（URL指定）
  * ========================================================== */
 app.post("/site-summary", async (req, res) => {
-  try {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ error: "Missing url" });
-
-    const prompt = `以下のWebサイトの内容を200文字以内で要約してください：${url}`;
-
-    const completion = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-5",
-        messages: [
-          { role: "system", content: "あなたはWeb記事の要約AIです。" },
-          { role: "user", content: prompt }
-        ]
-      })
-    });
-
-    const result = await completion.json();
-    res.json({ summary: result.choices[0].message.content });
-  } catch (error) {
-    console.error("Site Summary Error:", error);
-    res.status(500).json({ error: "Site Summary API failed" });
-  }
+  console.log("📩 Received POST /site-summary"); // ← デバッグ出力追加
+  console.log("Body:", req.body);
+  const { url } = req.body || {};
+  if (!url) return res.status(400).json({ error: "Missing url" });
+  res.json({ summary: "仮応答: URL受信OK" });
 });
-
 /* ==========================================================
  * ④ 開発環境専用の確認ルート（Render正常稼働確認用）
  * ========================================================== */
