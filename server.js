@@ -76,19 +76,25 @@ app.post("/summary", async (req, res) => {
       body: JSON.stringify({
         model: "gpt-5",
         messages: [
-          { role: "system", content: "あなたは日本語の会議議事録を要約するアシスタントです。" },
+          {
+            role: "system",
+            content:
+              "あなたは日本語の会議議事録を要約するアシスタントです。重要論点・決定事項・次回対応の3区分で簡潔にまとめてください。"
+          },
           { role: "user", content: text }
         ]
       })
     });
 
     const result = await completion.json();
-    res.json({ summary: result.choices[0].message.content });
+    const summary = result?.choices?.[0]?.message?.content ?? "（要約を生成できませんでした）";
+    res.json({ summary });
   } catch (error) {
     console.error("Summary API Error:", error);
     res.status(500).json({ error: "Summary API failed" });
   }
 });
+
 
 /* ==========================================================
  * ③ Webサイト要約API（URL指定）
