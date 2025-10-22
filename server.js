@@ -9,6 +9,7 @@ import fetch from "node-fetch";
 import OpenAI from "openai";
 import { marked } from "marked";
 import DOMPurify from "isomorphic-dompurify";
+import cors from "cors";
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
