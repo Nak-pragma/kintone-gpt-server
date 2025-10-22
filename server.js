@@ -12,6 +12,7 @@ import DOMPurify from "isomorphic-dompurify";
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
+app.use(cors());
 
 // ----------------------------------------------------------
 // 共通関数：Kintone APIラッパー
