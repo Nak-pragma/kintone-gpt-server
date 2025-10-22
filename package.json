@@ -1,6 +1,6 @@
 {
-  "name": "pragma-gpt-server",
-  "version": "1.0.2",
+  "name": "kintone-gpt-server",
+  "version": "1.0.4",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -9,10 +9,9 @@
   "dependencies": {
     "express": "^4.18.2",
     "node-fetch": "^3.3.2",
-    "dotenv": "^16.3.1",
     "openai": "^4.55.0",
-"marked": "^12.0.1",
-"isomorphic-dompurify": "^1.0.0"
-
+    "marked": "^12.0.1",
+    "isomorphic-dompurify": "^1.0.0",
+    "cors": "^2.8.5"     
   }
 }
