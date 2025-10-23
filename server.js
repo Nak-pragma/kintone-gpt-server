@@ -1,8 +1,8 @@
 /**
  * ==========================================================
- *  server_v1.0.6.js
+ *  server_v1.0.7.js
  *  ✅ Kintone × OpenAI Assistant (Thread + VectorStore + HTML保存)
- *  ✅ OpenAI SDK v4.104.0 対応構文 (resources.*)
+ *  ✅ OpenAI SDK v4.104.0 (最終安定構文)
  * ==========================================================
  */
 import express from "express";
@@ -13,25 +13,19 @@ import DOMPurify from "isomorphic-dompurify";
 import cors from "cors";
 import fs from "fs";
 
-// ====== SDKバージョン確認 ======
 const pkg = JSON.parse(fs.readFileSync("./node_modules/openai/package.json", "utf-8"));
 console.log("✅ OpenAI SDK version:", pkg.version);
 
-// ====== 初期化 ======
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 app.use(cors());
 
 // ----------------------------------------------------------
-// 共通関数：Kintone APIラッパー
+// 共通関数
 // ----------------------------------------------------------
 async function kGetRecords(appId, token, query) {
-  const url = `https://${process.env.KINTONE_DOMAIN}/k/v1/records.json?app=${appId}&query=${encodeURIComponent(
-    query
-  )}`;
-  const res = await fetch(url, {
-    headers: { "X-Cybozu-API-Token": token }
-  });
+  const url = `https://${process.env.KINTONE_DOMAIN}/k/v1/records.json?app=${appId}&query=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { "X-Cybozu-API-Token": token } });
   const data = await res.json();
   return data.records || [];
 }
@@ -41,10 +35,7 @@ async function kUpdateRecord(appId, token, id, recordObj) {
   const body = { app: appId, id, record: recordObj };
   await fetch(url, {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Cybozu-API-Token": token
-    },
+    headers: { "Content-Type": "application/json", "X-Cybozu-API-Token": token },
     body: JSON.stringify(body)
   });
 }
@@ -57,14 +48,12 @@ async function kDownloadFile(fileKey, token) {
 }
 
 // ----------------------------------------------------------
-// OpenAI初期化
+// OpenAI 初期化
 // ----------------------------------------------------------
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ----------------------------------------------------------
-// API: /assist/thread-chat
+// /assist/thread-chat
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
   try {
@@ -84,80 +73,61 @@ app.post("/assist/thread-chat", async (req, res) => {
     if (chats.length === 0) throw new Error("Chat record not found");
     const chat = chats[0];
 
-    // === ID類の取得または新規作成 ===
+    // === 各ID ===
     let assistantId = chat.assistant_id?.value;
     let threadId = chat.thread_id?.value;
     let vectorStoreId = chat.vector_store_id?.value;
-    const assistantConfig =
-      chat.assistant_config?.value || "あなたは誠実で丁寧な日本語アシスタントです。";
+    const assistantConfig = chat.assistant_config?.value || "あなたは誠実で丁寧な日本語アシスタントです。";
 
     // === Assistant作成 ===
     if (!assistantId) {
-      const a = await openai.resources.assistants.create({
+      const a = await openai.assistants.create({
         name: `Chat-${chatRecordId}`,
         instructions: assistantConfig,
         model: "gpt-4o",
         tools: [{ type: "file_search" }]
       });
       assistantId = a.id;
-      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
-        assistant_id: { value: assistantId }
-      });
+      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { assistant_id: { value: assistantId } });
       console.log(`✅ Assistant created: ${assistantId}`);
     }
 
     // === Thread作成 ===
     if (!threadId) {
-      const t = await openai.resources.threads.create();
+      const t = await openai.threads.create();
       threadId = t.id;
-      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
-        thread_id: { value: threadId }
-      });
+      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { thread_id: { value: threadId } });
       console.log(`✅ Thread created: ${threadId}`);
     }
 
     // === Vector Store作成 ===
     if (!vectorStoreId) {
-      const vs = await openai.resources.vectorStores.create({
-        name: `vs-${chatRecordId}`
-      });
+      const vs = await openai.vectorStores.create({ name: `vs-${chatRecordId}` });
       vectorStoreId = vs.id;
-      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
-        vector_store_id: { value: vectorStoreId }
-      });
+      await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { vector_store_id: { value: vectorStoreId } });
       console.log(`✅ Vector Store created: ${vectorStoreId}`);
     }
 
-    // === 資料送信（documentId指定時） ===
+    // === 資料送信 ===
     if (documentId) {
-      const docs = await kGetRecords(
-        DOC_APP_ID,
-        DOC_TOKEN,
-        `documentID = "${documentId}"`
-      );
+      const docs = await kGetRecords(DOC_APP_ID, DOC_TOKEN, `documentID = "${documentId}"`);
       if (docs.length === 0) throw new Error("Document not found");
       const doc = docs[0];
       const attach = doc.file_attach?.value?.[0];
       if (attach) {
         const buf = await kDownloadFile(attach.fileKey, DOC_TOKEN);
         const upload = await openai.files.create({
-          file: new File([Buffer.from(buf)], attach.name, {
-            type: "application/octet-stream"
-          }),
+          file: new File([Buffer.from(buf)], attach.name, { type: "application/octet-stream" }),
           purpose: "assistants"
         });
-        await openai.resources.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
-          file_ids: [upload.id]
-        });
-        console.log(
-          `✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`
-        );
+        await openai.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, { file_ids: [upload.id] });
+        console.log(`✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`);
       }
     }
 
     // === ユーザーメッセージ追加 ===
     if (message && message.trim()) {
-      await openai.resources.messages.create({
+      await openai.messages.create({
         thread_id: threadId,
         role: "user",
         content: message
@@ -165,7 +135,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     }
 
     // === Run実行 ===
-    const run = await openai.resources.runs.create({
+    const run = await openai.runs.create({
       thread_id: threadId,
       assistant_id: assistantId,
       tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
@@ -176,22 +146,20 @@ app.post("/assist/thread-chat", async (req, res) => {
     let status = run.status;
     while (["queued", "in_progress"].includes(status)) {
       await new Promise((r) => setTimeout(r, 1200));
-      const check = await openai.resources.runs.retrieve(run.id);
+      const check = await openai.runs.retrieve(run.id);
       status = check.status;
     }
 
     // === 最新メッセージ取得 ===
-    const msgs = await openai.resources.messages.list({
+    const msgs = await openai.messages.list({
       thread_id: threadId,
       order: "desc",
       limit: 1
     });
     const reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
 
-    // === Markdown→HTML変換 + サニタイズ ===
     const htmlReply = DOMPurify.sanitize(marked.parse(reply));
 
-    // === Kintone履歴更新 ===
     const newRow = {
       value: {
         user_message: { value: message || `📎 資料送信: ${documentId}` },
@@ -199,9 +167,7 @@ app.post("/assist/thread-chat", async (req, res) => {
       }
     };
     const newLog = (chat.chat_log?.value || []).concat(newRow);
-    await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
-      chat_log: { value: newLog }
-    });
+    await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { chat_log: { value: newLog } });
 
     res.json({ reply: htmlReply, threadId, assistantId, vectorStoreId });
   } catch (e) {
