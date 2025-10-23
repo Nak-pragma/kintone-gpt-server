@@ -1,7 +1,8 @@
 /**
  * ==========================================================
- *  server_v1.0.4.js
+ *  server_v1.0.5.js
  *  ✅ Kintone × OpenAI Assistant (Thread + VectorStore + HTML保存)
+ *  ✅ OpenAI SDK v4.100+ 安定構文対応
  * ==========================================================
  */
 import express from "express";
@@ -10,11 +11,10 @@ import OpenAI from "openai";
 import { marked } from "marked";
 import DOMPurify from "isomorphic-dompurify";
 import cors from "cors";
-
 import fs from "fs";
+
 const pkg = JSON.parse(fs.readFileSync("./node_modules/openai/package.json", "utf-8"));
 console.log("✅ OpenAI SDK version:", pkg.version);
-
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
@@ -62,11 +62,6 @@ const openai = new OpenAI({
 });
 
 // ----------------------------------------------------------
-// 既存API: /summary, /site-summary, /project-chat
-// （※省略：既存コードを残してOK）
-// ----------------------------------------------------------
-
-// ----------------------------------------------------------
 // 新API: /assist/thread-chat
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
@@ -96,11 +91,11 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Assistant作成 ===
     if (!assistantId) {
-      const a = await openai.beta.assistants.create({
+      const a = await openai.assistants.create({
         name: `Chat-${chatRecordId}`,
         instructions: assistantConfig,
         model: "gpt-4o",
-        tools: [{ type: "file_search" }] // ✅ 最新仕様
+        tools: [{ type: "file_search" }] // 最新仕様
       });
       assistantId = a.id;
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
@@ -111,7 +106,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Thread作成 ===
     if (!threadId) {
-      const t = await openai.beta.threads.create();
+      const t = await openai.threads.create();
       threadId = t.id;
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
         thread_id: { value: threadId }
@@ -121,7 +116,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Vector Store作成 ===
     if (!vectorStoreId) {
-      const vs = await openai.beta.vectorStores.create({
+      const vs = await openai.vectorStores.create({
         name: `vs-${chatRecordId}`
       });
       vectorStoreId = vs.id;
@@ -149,7 +144,7 @@ app.post("/assist/thread-chat", async (req, res) => {
           }),
           purpose: "assistants"
         });
-        await openai.beta.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
+        await openai.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
           file_ids: [upload.id]
         });
         console.log(
@@ -160,16 +155,18 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === ユーザーメッセージ追加 ===
     if (message && message.trim()) {
-      await openai.beta.threads.messages.create(threadId, {
+      await openai.messages.create({
+        thread_id: threadId,
         role: "user",
         content: message
       });
     }
 
     // === Run実行 ===
-    const run = await openai.beta.threads.runs.create(threadId, {
+    const run = await openai.runs.create({
+      thread_id: threadId,
       assistant_id: assistantId,
-      tool_resources: { vector_store_ids: [vectorStoreId] },
+      tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
       instructions: "日本語で論理的かつ構造的に回答してください。"
     });
 
@@ -177,12 +174,13 @@ app.post("/assist/thread-chat", async (req, res) => {
     let status = run.status;
     while (["queued", "in_progress"].includes(status)) {
       await new Promise((r) => setTimeout(r, 1200));
-      const check = await openai.beta.threads.runs.retrieve(threadId, run.id);
+      const check = await openai.runs.retrieve(run.id);
       status = check.status;
     }
 
     // === 最新メッセージ取得 ===
-    const msgs = await openai.beta.threads.messages.list(threadId, {
+    const msgs = await openai.messages.list({
+      thread_id: threadId,
       order: "desc",
       limit: 1
     });
