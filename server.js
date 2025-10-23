@@ -11,6 +11,10 @@ import { marked } from "marked";
 import DOMPurify from "isomorphic-dompurify";
 import cors from "cors";
 
+import fs from "fs";
+const pkg = JSON.parse(fs.readFileSync("./node_modules/openai/package.json", "utf-8"));
+console.log("✅ OpenAI SDK version:", pkg.version);
+
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
