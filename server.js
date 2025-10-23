@@ -1,8 +1,8 @@
 /**
  * ==========================================================
- *  server_v1.0.5.js
+ *  server_v1.0.6.js
  *  ✅ Kintone × OpenAI Assistant (Thread + VectorStore + HTML保存)
- *  ✅ OpenAI SDK v4.100+ 安定構文対応
+ *  ✅ OpenAI SDK v4.104.0 対応構文 (resources.*)
  * ==========================================================
  */
 import express from "express";
@@ -13,9 +13,11 @@ import DOMPurify from "isomorphic-dompurify";
 import cors from "cors";
 import fs from "fs";
 
+// ====== SDKバージョン確認 ======
 const pkg = JSON.parse(fs.readFileSync("./node_modules/openai/package.json", "utf-8"));
 console.log("✅ OpenAI SDK version:", pkg.version);
 
+// ====== 初期化 ======
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 app.use(cors());
@@ -62,7 +64,7 @@ const openai = new OpenAI({
 });
 
 // ----------------------------------------------------------
-// 新API: /assist/thread-chat
+// API: /assist/thread-chat
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
   try {
@@ -91,11 +93,11 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Assistant作成 ===
     if (!assistantId) {
-      const a = await openai.assistants.create({
+      const a = await openai.resources.assistants.create({
         name: `Chat-${chatRecordId}`,
         instructions: assistantConfig,
         model: "gpt-4o",
-        tools: [{ type: "file_search" }] // 最新仕様
+        tools: [{ type: "file_search" }]
       });
       assistantId = a.id;
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
@@ -106,7 +108,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Thread作成 ===
     if (!threadId) {
-      const t = await openai.threads.create();
+      const t = await openai.resources.threads.create();
       threadId = t.id;
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, {
         thread_id: { value: threadId }
@@ -116,7 +118,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === Vector Store作成 ===
     if (!vectorStoreId) {
-      const vs = await openai.vectorStores.create({
+      const vs = await openai.resources.vectorStores.create({
         name: `vs-${chatRecordId}`
       });
       vectorStoreId = vs.id;
@@ -144,7 +146,7 @@ app.post("/assist/thread-chat", async (req, res) => {
           }),
           purpose: "assistants"
         });
-        await openai.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
+        await openai.resources.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
           file_ids: [upload.id]
         });
         console.log(
@@ -155,7 +157,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // === ユーザーメッセージ追加 ===
     if (message && message.trim()) {
-      await openai.messages.create({
+      await openai.resources.messages.create({
         thread_id: threadId,
         role: "user",
         content: message
@@ -163,7 +165,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     }
 
     // === Run実行 ===
-    const run = await openai.runs.create({
+    const run = await openai.resources.runs.create({
       thread_id: threadId,
       assistant_id: assistantId,
       tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
@@ -174,12 +176,12 @@ app.post("/assist/thread-chat", async (req, res) => {
     let status = run.status;
     while (["queued", "in_progress"].includes(status)) {
       await new Promise((r) => setTimeout(r, 1200));
-      const check = await openai.runs.retrieve(run.id);
+      const check = await openai.resources.runs.retrieve(run.id);
       status = check.status;
     }
 
     // === 最新メッセージ取得 ===
-    const msgs = await openai.messages.list({
+    const msgs = await openai.resources.messages.list({
       thread_id: threadId,
       order: "desc",
       limit: 1
