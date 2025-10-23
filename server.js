@@ -10,7 +10,7 @@ import OpenAI from "openai";
 import { marked } from "marked";
 import DOMPurify from "isomorphic-dompurify";
 import cors from "cors";
-console.log("OpenAI SDK version:", (await import("openai/package.json")).version);
+
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
