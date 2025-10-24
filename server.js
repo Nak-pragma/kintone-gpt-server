@@ -55,6 +55,10 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // ----------------------------------------------------------
 // /assist/thread-chat
 // ----------------------------------------------------------
+console.log("✅ 環境変数:", process.env.OPENAI_API_KEY ? "OK" : "MISSING");
+console.log("✅ client keys:", Object.keys(client));
+console.log("✅ client.beta:", typeof client.beta);
+
 app.post("/assist/thread-chat", async (req, res) => {
   try {
     const { chatRecordId, message, documentId } = req.body;
