@@ -116,23 +116,25 @@ console.log("model:", "gpt-4o");
     }
 
     // === 資料送信 ===
-    if (documentId) {
-      const docs = await kGetRecords(DOC_APP_ID, DOC_TOKEN, `documentID = "${documentId}"`);
-      if (docs.length === 0) throw new Error("Document not found");
-      const doc = docs[0];
-      const attach = doc.file_attach?.value?.[0];
-      if (attach) {
-        const buf = await kDownloadFile(attach.fileKey, DOC_TOKEN);
-        const upload = await client.files.create({
-          file: new File([Buffer.from(buf)], attach.name, { type: "application/octet-stream" }),
-          purpose: "assistants"
-        });
-        await client.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
-          file_ids: [upload.id]
-        });
-        console.log(`✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`);
-      }
-    }
+    // === 資料送信 ===
+if (documentId) {
+  const docs = await kGetRecords(DOC_APP_ID, DOC_TOKEN, `documentID = "${documentId}"`);
+  if (docs.length === 0) throw new Error("Document not found");
+  const doc = docs[0];
+  const attach = doc.file_attach?.value?.[0];
+  if (attach) {
+    const buf = await kDownloadFile(attach.fileKey, DOC_TOKEN);
+    const upload = await client.files.create({
+      file: new File([Buffer.from(buf)], attach.name, { type: "application/octet-stream" }),
+      purpose: "assistants"
+    });
+    await client.vectorStores.fileBatches.createAndPoll(vectorStoreId, {
+      file_ids: [upload.id],
+    });
+    console.log(`✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`);
+  }
+}
+
 
     // === メッセージ追加 ===
     if (message && message.trim()) {
