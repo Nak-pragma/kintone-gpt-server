@@ -176,10 +176,14 @@ console.log("model:", "gpt-4o");
   } catch (e) {
   console.error("❌ /assist/thread-chat Error:", e);
   if (e.response) {
-    console.error("🧩 OpenAI API Response:", await e.response.text());
+    try {
+      const text = await e.response.text();
+      console.error("🧩 OpenAI API Response:", text);
+    } catch {}
   }
   res.status(500).json({ error: e.message });
 }
+
 
 });
 
