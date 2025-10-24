@@ -55,8 +55,7 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // ----------------------------------------------------------
 // /assist/thread-chat
 // ----------------------------------------------------------
-console.log("assistantConfig:", assistantConfig);
-console.log("model:", "gpt-4o");
+
 
 console.log("✅ 環境変数:", process.env.OPENAI_API_KEY ? "OK" : "MISSING");
 console.log("✅ client keys:", Object.keys(client));
@@ -83,6 +82,9 @@ app.post("/assist/thread-chat", async (req, res) => {
     let vectorStoreId = chat.vector_store_id?.value;
     const assistantConfig =
       chat.assistant_config?.value || "あなたは誠実で丁寧な日本語アシスタントです。";
+
+    console.log("assistantConfig:", assistantConfig);
+console.log("model:", "gpt-4o");
 
     // === Assistant 作成 ===
     if (!assistantId) {
