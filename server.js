@@ -1,8 +1,8 @@
 /**
  * ==========================================================
- *  server_v1.0.8.js (patched)
+ *  server_v1.0.9.js
  *  ✅ Kintone × OpenAI Assistant (Thread + VectorStore + HTML保存)
- *  ✅ OpenAI SDK v4.104.0 変動吸収（beta/非beta 両対応）
+ *  ✅ GPTモデル選択対応（gpt-5含む）
  * ==========================================================
  */
 import express from "express";
@@ -52,46 +52,37 @@ async function kDownloadFile(fileKey, token) {
 // ----------------------------------------------------------
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// beta / 非beta の差異を吸収（assistant/threads/vectorStores 作成系）
+// beta / 非beta の差異を吸収
 const A  = client.assistants ?? client.beta?.assistants;
 const T  = client.threads    ?? client.beta?.threads;
-const VS = client.beta?.vectorStores ?? client.vectorStores; // createはbeta寄り、fileBatchesは直下
+const VS = client.beta?.vectorStores ?? client.vectorStores;
 
 console.log("✅ 環境変数:", process.env.OPENAI_API_KEY ? "OK" : "MISSING");
-console.log("✅ client keys:", Object.keys(client));
-console.log("✅ A (assistants) available:", !!A);
-console.log("✅ T (threads) available:", !!T);
-console.log("✅ VS (vectorStores) available:", !!VS);
+console.log("✅ A (assistants):", !!A);
+console.log("✅ T (threads):", !!T);
+console.log("✅ VS (vectorStores):", !!VS);
 
 // ----------------------------------------------------------
-// /assist/thread-chat
+// /assist/thread-chat （モデル選択対応版）
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
   try {
-    const { chatRecordId, message, documentId } = req.body;
+    const { chatRecordId, message, documentId, model } = req.body;
 
-    // 1) 入力バリデーション強化
-    if (!chatRecordId) {
-      return res.status(400).json({ error: "chatRecordId is required" });
-    }
-    if (!message && !documentId) {
-      return res.status(400).json({ error: "Either message or documentId is required" });
-    }
-
-    console.log("💬 /assist/thread-chat called:", { chatRecordId, hasMessage: !!message, hasDocument: !!documentId });
+    if (!chatRecordId) return res.status(400).json({ error: "chatRecordId is required" });
+    if (!message && !documentId) return res.status(400).json({ error: "Either message or documentId is required" });
 
     const CHAT_APP_ID = process.env.KINTONE_CHAT_APP_ID;
     const CHAT_TOKEN  = process.env.KINTONE_CHAT_TOKEN;
     const DOC_APP_ID  = process.env.KINTONE_DOCUMENT_APP_ID;
     const DOC_TOKEN   = process.env.KINTONE_DOCUMENT_TOKEN;
 
-    if (!CHAT_APP_ID || !CHAT_TOKEN) {
-      throw new Error("Kintone chat app env not set (KINTONE_CHAT_APP_ID / KINTONE_CHAT_TOKEN)");
-    }
+    const selectedModel = model || "gpt-4o-mini"; // ★ デフォルト
 
-    // 2) チャットレコード取得
+    console.log("💬 /assist/thread-chat called:", { chatRecordId, selectedModel });
+
+    // ---- Kintone チャットレコード取得 ----
     const chats = await kGetRecords(CHAT_APP_ID, CHAT_TOKEN, `$id = ${chatRecordId}`);
-    console.log("💬 chats.length:", chats.length);
     if (chats.length === 0) throw new Error("Chat record not found");
     const chat = chats[0];
 
@@ -101,21 +92,18 @@ app.post("/assist/thread-chat", async (req, res) => {
     const assistantConfig =
       chat.assistant_config?.value || "あなたは誠実で丁寧な日本語アシスタントです。";
 
-    console.log("💬 ids before:", { assistantId, threadId, vectorStoreId });
-    console.log("assistantConfig:", assistantConfig);
-    console.log("model:", "gpt-4o");
+    console.log("💬 Existing IDs:", { assistantId, threadId, vectorStoreId });
 
-    // 3) API名の存在を実行前にチェック（新規レコード時の .create undefined を防止）
-    if (!A?.create)  throw new Error("OpenAI assistants.create API not available (SDK namespace mismatch).");
-    if (!T?.create)  throw new Error("OpenAI threads.create API not available (SDK namespace mismatch).");
-    if (!VS?.create) throw new Error("OpenAI vectorStores.create API not available (SDK namespace mismatch).");
+    if (!A?.create)  throw new Error("assistants.create unavailable");
+    if (!T?.create)  throw new Error("threads.create unavailable");
+    if (!VS?.create) throw new Error("vectorStores.create unavailable");
 
-    // === Assistant 作成（新規レコードでだけ走る想定）===
+    // ---- Assistant作成 ----
     if (!assistantId) {
       const a = await A.create({
         name: `Chat-${chatRecordId}`,
         instructions: assistantConfig,
-        model: "gpt-4o",
+        model: selectedModel,
         tools: [{ type: "file_search" }]
       });
       assistantId = a.id;
@@ -123,7 +111,7 @@ app.post("/assist/thread-chat", async (req, res) => {
       console.log(`✅ Assistant created: ${assistantId}`);
     }
 
-    // === Thread 作成 ===
+    // ---- Thread作成 ----
     if (!threadId) {
       const t = await T.create();
       threadId = t.id;
@@ -131,7 +119,7 @@ app.post("/assist/thread-chat", async (req, res) => {
       console.log(`✅ Thread created: ${threadId}`);
     }
 
-    // === Vector Store 作成 ===
+    // ---- VectorStore作成 ----
     if (!vectorStoreId) {
       const vs = await VS.create({ name: `vs-${chatRecordId}` });
       vectorStoreId = vs.id;
@@ -139,9 +127,9 @@ app.post("/assist/thread-chat", async (req, res) => {
       console.log(`✅ Vector Store created: ${vectorStoreId}`);
     }
 
-    // === 資料送信（任意）===
+    // ---- 資料送信処理 ----
     if (documentId) {
-      if (!DOC_APP_ID || !DOC_TOKEN) throw new Error("Kintone document env not set (KINTONE_DOCUMENT_APP_ID / KINTONE_DOCUMENT_TOKEN)");
+      if (!DOC_APP_ID || !DOC_TOKEN) throw new Error("Kintone document env not set");
       const docs = await kGetRecords(DOC_APP_ID, DOC_TOKEN, `documentID = "${documentId}"`);
       if (docs.length === 0) throw new Error("Document not found");
       const doc = docs[0];
@@ -152,56 +140,50 @@ app.post("/assist/thread-chat", async (req, res) => {
           file: new File([Buffer.from(buf)], attach.name, { type: "application/octet-stream" }),
           purpose: "assistants"
         });
-        // 4.104.0以降は createAndPoll（file_ids を登録）
-        await client.vectorStores.fileBatches.createAndPoll(vectorStoreId, {
-          file_ids: [upload.id],
-        });
+        await client.vectorStores.fileBatches.createAndPoll(vectorStoreId, { file_ids: [upload.id] });
         console.log(`✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`);
       }
     }
 
-    // === メッセージ追加 ===
+    // ---- メッセージ送信 ----
     if (message && message.trim()) {
-      // threads.messages は beta/非beta 両対応（T配下にぶら下がる想定）
-      if (!T?.messages?.create) throw new Error("OpenAI threads.messages.create not available");
+      if (!T?.messages?.create) throw new Error("threads.messages.create unavailable");
       await T.messages.create(threadId, { role: "user", content: message });
     }
 
-    // === Run実行 ===
-    if (!T?.runs?.create) throw new Error("OpenAI threads.runs.create not available");
+    // ---- Run実行（モデル指定版）----
+    if (!T?.runs?.create) throw new Error("threads.runs.create unavailable");
     const run = await T.runs.create(threadId, {
       assistant_id: assistantId,
+      model: selectedModel, // ★ ここでユーザー選択モデルを適用
       tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
       instructions: "日本語で論理的かつ構造的に回答してください。"
     });
 
-    // === 完了待ち ===
+    // ---- 完了待ち ----
     let status = run.status;
     while (["queued", "in_progress"].includes(status)) {
       await new Promise((r) => setTimeout(r, 1200));
-      if (!T?.runs?.retrieve) throw new Error("OpenAI threads.runs.retrieve not available");
       const check = await T.runs.retrieve(threadId, run.id);
       status = check.status;
     }
 
-    // === メッセージ取得 ===
-    if (!T?.messages?.list) throw new Error("OpenAI threads.messages.list not available");
+    // ---- メッセージ取得 ----
     const msgs = await T.messages.list(threadId, { order: "desc", limit: 1 });
     const reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
-
     const htmlReply = DOMPurify.sanitize(marked.parse(reply));
 
     const newRow = {
       value: {
         user_message: { value: message || `📎 資料送信: ${documentId}` },
-        ai_reply: { value: htmlReply }
+        ai_reply: { value: htmlReply },
+        model_used: { value: selectedModel } // ★ 使用モデルを記録
       }
     };
     const newLog = (chat.chat_log?.value || []).concat(newRow);
     await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { chat_log: { value: newLog } });
 
-    console.log("💬 ids after:", { assistantId, threadId, vectorStoreId });
-    res.json({ reply: htmlReply, threadId, assistantId, vectorStoreId });
+    res.json({ reply: htmlReply, model: selectedModel, threadId, assistantId, vectorStoreId });
 
   } catch (e) {
     console.error("❌ /assist/thread-chat Error:", e);
