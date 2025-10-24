@@ -127,7 +127,7 @@ console.log("model:", "gpt-4o");
           file: new File([Buffer.from(buf)], attach.name, { type: "application/octet-stream" }),
           purpose: "assistants"
         });
-        await client.beta.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
+        await client.vectorStores.fileBatches.uploadAndPoll(vectorStoreId, {
           file_ids: [upload.id]
         });
         console.log(`✅ Document "${documentId}" uploaded to Vector Store ${vectorStoreId}`);
