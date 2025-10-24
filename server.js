@@ -55,6 +55,9 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // ----------------------------------------------------------
 // /assist/thread-chat
 // ----------------------------------------------------------
+console.log("assistantConfig:", assistantConfig);
+console.log("model:", "gpt-4o");
+
 console.log("✅ 環境変数:", process.env.OPENAI_API_KEY ? "OK" : "MISSING");
 console.log("✅ client keys:", Object.keys(client));
 console.log("✅ client.beta:", typeof client.beta);
@@ -169,9 +172,13 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     res.json({ reply: htmlReply, threadId, assistantId, vectorStoreId });
   } catch (e) {
-    console.error("❌ /assist/thread-chat Error:", e);
-    res.status(500).json({ error: e.message });
+  console.error("❌ /assist/thread-chat Error:", e);
+  if (e.response) {
+    console.error("🧩 OpenAI API Response:", await e.response.text());
   }
+  res.status(500).json({ error: e.message });
+}
+
 });
 
 // ----------------------------------------------------------
