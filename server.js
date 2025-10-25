@@ -198,7 +198,55 @@ app.post("/assist/thread-chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------
-// /document-summary: 資料要約＋タグ自動生成
+// 🔧 ヘルパー：テキスト分割と要約統合
+// ----------------------------------------------------------
+function chunkText(text, maxLength = 10000) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += maxLength) chunks.push(text.slice(i, i + maxLength));
+  return chunks;
+}
+
+async function summarizeLongText(text) {
+  const chunks = chunkText(text);
+  const summaries = [];
+
+  console.log(`🧩 ${chunks.length} チャンクに分割して要約します`);
+
+  for (const chunk of chunks) {
+    const res = await client.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: "user", content: `次のテキストを200字で要約してください。\n${chunk}` }],
+      temperature: 0.3,
+    });
+    summaries.push(res.choices[0].message.content);
+  }
+
+  const finalRes = await client.chat.completions.create({
+    model: MODEL,
+    messages: [{ role: "user", content: `以下の要約を統合して300字でまとめてください:\n${summaries.join("\n")}` }],
+    temperature: 0.3,
+  });
+  return finalRes.choices[0].message.content.trim();
+}
+
+async function generateTags(text) {
+  const prompt = `
+以下の文章から関連する英語タグを3〜6個出してください。
+出力形式は ["tag1","tag2",...] のJSON配列のみ。
+文章：
+${text.slice(0, 8000)}
+`;
+  const res = await client.chat.completions.create({
+    model: MODEL,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.3,
+  });
+  const match = res.choices[0].message.content.match(/\[.*\]/s);
+  return match ? JSON.parse(match[0]) : [];
+}
+
+// ----------------------------------------------------------
+// /document-summary : 長文要約＋タグ自動生成
 // ----------------------------------------------------------
 app.post("/document-summary", async (req, res) => {
   try {
@@ -207,42 +255,14 @@ app.post("/document-summary", async (req, res) => {
 
     console.log("📘 /document-summary called:", { appId, recordId });
 
-    const prompt = `
-あなたは製造業R&D・ナレッジマネジメント分野の専門AIです。
-以下の文書を200〜300字で要約し、内容に適した英語タグを3〜6個出してください。
-出力は純粋なJSONのみで返してください。
+    const summary = await summarizeLongText(text);
+    const tags = await generateTags(summary);
 
-出力形式:
-{
-  "summary": "要約文",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-
-本文:
-${text}
-`;
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-    });
-
-    const output = completion.choices[0].message.content || "{}";
-    console.log("🧠 Raw Output:", output);
-
-    const jsonMatch = output.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("JSON parse error");
-    const parsed = JSON.parse(jsonMatch[0]);
-    const summary = parsed.summary || "";
-    const tags = parsed.tags || [];
-
-    // ---- Kintone反映 ----
     if (appId && recordId) {
       await kUpdateRecord(appId, process.env.KINTONE_DOCUMENT_TOKEN, recordId, {
         summary: { value: summary },
         tags: { value: tags },
-        status: { value: "完了" }
+        status: { value: "完了" },
       });
       console.log(`✅ Record ${recordId} updated with AI summary`);
     }
