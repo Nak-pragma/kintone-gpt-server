@@ -198,6 +198,44 @@ app.post("/assist/thread-chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------
+// GitHub ファイル参照API
+// ----------------------------------------------------------
+app.get("/github/file", async (req, res) => {
+  try {
+    const { path } = req.query;
+    if (!path) return res.status(400).json({ error: "Missing ?path parameter" });
+
+    // 固定で特定リポジトリのみ許可（安全性確保）
+    const repo = "Nak-pragma/kintone-gpt-server";
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+    const resp = await fetch(url, {
+      headers: {
+        "Authorization": `token ${process.env.GITHUB_TOKEN}`,
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "pragma-server"
+      }
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`GitHub API error ${resp.status}: ${text}`);
+    }
+
+    const data = await resp.json();
+    if (!data.content) throw new Error("No content in response");
+
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
+    res.json({ path, content });
+
+  } catch (e) {
+    console.error("❌ /github/file Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ----------------------------------------------------------
 // 健康チェック
 // ----------------------------------------------------------
 app.get("/", (req, res) => res.send("✅ Server is alive"));
