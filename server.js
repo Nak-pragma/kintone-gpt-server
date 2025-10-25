@@ -198,6 +198,64 @@ app.post("/assist/thread-chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------
+// /document-summary: 資料要約＋タグ自動生成
+// ----------------------------------------------------------
+app.post("/document-summary", async (req, res) => {
+  try {
+    const { appId, recordId, text } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing text" });
+
+    console.log("📘 /document-summary called:", { appId, recordId });
+
+    const prompt = `
+あなたは製造業R&D・ナレッジマネジメント分野の専門AIです。
+以下の文書を200〜300字で要約し、内容に適した英語タグを3〜6個出してください。
+出力は純粋なJSONのみで返してください。
+
+出力形式:
+{
+  "summary": "要約文",
+  "tags": ["tag1", "tag2", "tag3"]
+}
+
+本文:
+${text}
+`;
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+    });
+
+    const output = completion.choices[0].message.content || "{}";
+    console.log("🧠 Raw Output:", output);
+
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("JSON parse error");
+    const parsed = JSON.parse(jsonMatch[0]);
+    const summary = parsed.summary || "";
+    const tags = parsed.tags || [];
+
+    // ---- Kintone反映 ----
+    if (appId && recordId) {
+      await kUpdateRecord(appId, process.env.KINTONE_DOCUMENT_TOKEN, recordId, {
+        summary: { value: summary },
+        tags: { value: tags },
+        status: { value: "完了" }
+      });
+      console.log(`✅ Record ${recordId} updated with AI summary`);
+    }
+
+    res.json({ summary, tags });
+  } catch (e) {
+    console.error("❌ /document-summary Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ----------------------------------------------------------
 // GitHub ファイル参照API
 // ----------------------------------------------------------
 app.get("/github/file", async (req, res) => {
