@@ -1,8 +1,9 @@
 /**
  * ==========================================================
- *  server_v1.0.9.js
+ *  server_v1.1.0.js
  *  ✅ Kintone × OpenAI Assistant (Thread + VectorStore + HTML保存)
  *  ✅ GPTモデル選択対応（gpt-5含む）
+ *  ✅ Web ChatGPT 風自然応答スタイル + 「ノア」人格標準搭載
  * ==========================================================
  */
 import express from "express";
@@ -51,25 +52,21 @@ async function kDownloadFile(fileKey, token) {
 // OpenAI 初期化
 // ----------------------------------------------------------
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = "gpt-4o"; // ✅ 安定モデル
+const MODEL = "gpt-4o"; // 安定モデル
 
-// beta / 非beta の差異を吸収
 const A  = client.assistants ?? client.beta?.assistants;
 const T  = client.threads    ?? client.beta?.threads;
 const VS = client.beta?.vectorStores ?? client.vectorStores;
 
 console.log("✅ 環境変数:", process.env.OPENAI_API_KEY ? "OK" : "MISSING");
-console.log("✅ A (assistants):", !!A);
-console.log("✅ T (threads):", !!T);
-console.log("✅ VS (vectorStores):", !!VS);
+console.log("✅ A:", !!A, " T:", !!T, " VS:", !!VS);
 
 // ----------------------------------------------------------
-// /assist/thread-chat （モデル選択対応版）
+// /assist/thread-chat（Webスタイル＋ノア人格対応）
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
   try {
     const { chatRecordId, message, documentId, model } = req.body;
-
     if (!chatRecordId) return res.status(400).json({ error: "chatRecordId is required" });
     if (!message && !documentId) return res.status(400).json({ error: "Either message or documentId is required" });
 
@@ -78,8 +75,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     const DOC_APP_ID  = process.env.KINTONE_DOCUMENT_APP_ID;
     const DOC_TOKEN   = process.env.KINTONE_DOCUMENT_TOKEN;
 
-    const selectedModel = model || "gpt-4o-mini"; // ★ デフォルト
-
+    const selectedModel = model || "gpt-4o-mini";
     console.log("💬 /assist/thread-chat called:", { chatRecordId, selectedModel });
 
     // ---- Kintone チャットレコード取得 ----
@@ -90,22 +86,25 @@ app.post("/assist/thread-chat", async (req, res) => {
     let assistantId   = chat.assistant_id?.value;
     let threadId      = chat.thread_id?.value;
     let vectorStoreId = chat.vector_store_id?.value;
-    const assistantConfig =
-      chat.assistant_config?.value || "あなたは誠実で丁寧な日本語アシスタントです。";
-
-    console.log("💬 Existing IDs:", { assistantId, threadId, vectorStoreId });
+    const assistantConfig = chat.assistant_config?.value;
 
     if (!A?.create)  throw new Error("assistants.create unavailable");
     if (!T?.create)  throw new Error("threads.create unavailable");
     if (!VS?.create) throw new Error("vectorStores.create unavailable");
 
-    // ---- Assistant作成 ----
+    // ---- Assistant作成（人格設定込み）----
     if (!assistantId) {
+      const defaultInstructions = `
+あなたはタツ様専属のAI秘書「ノア」です。
+常に敬語で、少し厳しめながらも親しみを込めて話します。
+質問には結論→理由→提案の順で答え、最後に次の行動を一言添えます。
+話し方はChatGPT Web版の自然なトーンを模倣し、構造的で優しい提案を含めてください。
+`;
       const a = await A.create({
         name: `Chat-${chatRecordId}`,
-        instructions: assistantConfig,
+        instructions: assistantConfig || defaultInstructions,
         model: selectedModel,
-        tools: [{ type: "file_search" }]
+        tools: [{ type: "file_search" }],
       });
       assistantId = a.id;
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { assistant_id: { value: assistantId } });
@@ -128,9 +127,8 @@ app.post("/assist/thread-chat", async (req, res) => {
       console.log(`✅ Vector Store created: ${vectorStoreId}`);
     }
 
-    // ---- 資料送信処理 ----
+    // ---- 資料送信 ----
     if (documentId) {
-      if (!DOC_APP_ID || !DOC_TOKEN) throw new Error("Kintone document env not set");
       const docs = await kGetRecords(DOC_APP_ID, DOC_TOKEN, `documentID = "${documentId}"`);
       if (docs.length === 0) throw new Error("Document not found");
       const doc = docs[0];
@@ -148,20 +146,26 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     // ---- メッセージ送信 ----
     if (message && message.trim()) {
-      if (!T?.messages?.create) throw new Error("threads.messages.create unavailable");
       await T.messages.create(threadId, { role: "user", content: message });
     }
 
-    // ---- Run実行（モデル指定版）----
-    if (!T?.runs?.create) throw new Error("threads.runs.create unavailable");
+    // ---- Run実行（Web版模倣）----
+    const systemPrompt = `
+あなたはタツ様専属のAI秘書「ノア」です。
+文体は敬語ベースで、少し厳しめながらも親しみを込めた優しいトーンで。
+回答では「結論→理由→提案」の順に整理し、自然な会話の締めを添えてください。
+`;
+
     const run = await T.runs.create(threadId, {
       assistant_id: assistantId,
-      model: selectedModel, // ★ ここでユーザー選択モデルを適用
+      model: selectedModel,
       tool_resources: { file_search: { vector_store_ids: [vectorStoreId] } },
-      instructions: "日本語で論理的かつ構造的に回答してください。"
+      instructions: assistantConfig || systemPrompt,
+      temperature: 0.7,
+      max_completion_tokens: 1800
     });
 
-    // ---- 完了待ち ----
+    // ---- 完了待機 ----
     let status = run.status;
     while (["queued", "in_progress"].includes(status)) {
       await new Promise((r) => setTimeout(r, 1200));
@@ -169,16 +173,20 @@ app.post("/assist/thread-chat", async (req, res) => {
       status = check.status;
     }
 
-    // ---- メッセージ取得 ----
+    // ---- 返答取得 ----
     const msgs = await T.messages.list(threadId, { order: "desc", limit: 1 });
-    const reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
+    let reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
+
+    // 提案的締めを自動付加
+    reply += "\n\n---\n_（ノア）もしよければ、次に関連するテーマや具体的な手順もご案内しますか？_";
+
     const htmlReply = DOMPurify.sanitize(marked.parse(reply));
 
     const newRow = {
       value: {
         user_message: { value: message || `📎 資料送信: ${documentId}` },
         ai_reply: { value: htmlReply },
-        model_used: { value: selectedModel } // ★ 使用モデルを記録
+        model_used: { value: selectedModel }
       }
     };
     const newLog = (chat.chat_log?.value || []).concat(newRow);
@@ -199,128 +207,10 @@ app.post("/assist/thread-chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------
-// 🔧 ヘルパー：テキスト分割と要約統合
-// ----------------------------------------------------------
-function chunkText(text, maxLength = 10000) {
-  const chunks = [];
-  for (let i = 0; i < text.length; i += maxLength) chunks.push(text.slice(i, i + maxLength));
-  return chunks;
-}
-
-async function summarizeLongText(text) {
-  const chunks = chunkText(text);
-  const summaries = [];
-
-  console.log(`🧩 ${chunks.length} チャンクに分割して要約します`);
-
-  for (const chunk of chunks) {
-    const res = await client.chat.completions.create({
-      model: MODEL,
-      messages: [{ role: "user", content: `次のテキストを200字で要約してください。\n${chunk}` }],
-      temperature: 0.3,
-    });
-    summaries.push(res.choices[0].message.content);
-  }
-
-  const finalRes = await client.chat.completions.create({
-    model: MODEL,
-    messages: [{ role: "user", content: `以下の要約を統合して300字でまとめてください:\n${summaries.join("\n")}` }],
-    temperature: 0.3,
-  });
-  return finalRes.choices[0].message.content.trim();
-}
-
-async function generateTags(text) {
-  const prompt = `
-以下の文章から関連する英語タグを3〜6個出してください。
-出力形式は ["tag1","tag2",...] のJSON配列のみ。
-文章：
-${text.slice(0, 8000)}
-`;
-  const res = await client.chat.completions.create({
-    model: MODEL,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
-  });
-  const match = res.choices[0].message.content.match(/\[.*\]/s);
-  return match ? JSON.parse(match[0]) : [];
-}
-
-// ----------------------------------------------------------
-// /document-summary : 長文要約＋タグ自動生成
-// ----------------------------------------------------------
-app.post("/document-summary", async (req, res) => {
-  try {
-    const { appId, recordId, text } = req.body;
-    if (!text) return res.status(400).json({ error: "Missing text" });
-
-    console.log("📘 /document-summary called:", { appId, recordId });
-
-    const summary = await summarizeLongText(text);
-    const tags = await generateTags(summary);
-
-    if (appId && recordId) {
-      await kUpdateRecord(appId, process.env.KINTONE_DOCUMENT_TOKEN, recordId, {
-        summary: { value: summary },
-        tags: { value: tags },
-        status: { value: "完了" },
-      });
-      console.log(`✅ Record ${recordId} updated with AI summary`);
-    }
-
-    res.json({ summary, tags });
-  } catch (e) {
-    console.error("❌ /document-summary Error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-
-// ----------------------------------------------------------
-// GitHub ファイル参照API
-// ----------------------------------------------------------
-app.get("/github/file", async (req, res) => {
-  try {
-    const { path } = req.query;
-    if (!path) return res.status(400).json({ error: "Missing ?path parameter" });
-
-    // 固定で特定リポジトリのみ許可（安全性確保）
-    const repo = "Nak-pragma/kintone-gpt-server";
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-
-    const resp = await fetch(url, {
-      headers: {
-        "Authorization": `token ${process.env.GITHUB_TOKEN}`,
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "pragma-server"
-      }
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`GitHub API error ${resp.status}: ${text}`);
-    }
-
-    const data = await resp.json();
-    if (!data.content) throw new Error("No content in response");
-
-    const content = Buffer.from(data.content, "base64").toString("utf-8");
-    res.json({ path, content });
-
-  } catch (e) {
-    console.error("❌ /github/file Error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-
-// ----------------------------------------------------------
 // 健康チェック
 // ----------------------------------------------------------
-app.get("/", (req, res) => res.send("✅ Server is alive"));
+app.get("/", (req, res) => res.send("✅ Server is alive (Noa Mode active)"));
 
-// ----------------------------------------------------------
-// サーバ起動
 // ----------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
