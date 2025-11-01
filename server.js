@@ -277,8 +277,7 @@ app.post("/assist/thread-chat", async (req, res) => {
       instructions: assistantConfig || systemPrompt,
       temperature: params.temperature,
       top_p: params.top_p,
-      presence_penalty: params.presence_penalty,
-      frequency_penalty: params.frequency_penalty,
+     
       max_completion_tokens: params.max_completion_tokens,
       metadata: params.metadata
     });
