@@ -253,7 +253,7 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     const msgs = await T.messages.list(threadId, { order: "desc", limit: 1 });
     let reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
-    reply += "\n\n---\n_（ノア）もしよければ、次に関連するテーマも整理いたしますか？_";
+    
     const htmlReply = DOMPurify.sanitize(marked.parse(reply));
 
     const newRow = {
