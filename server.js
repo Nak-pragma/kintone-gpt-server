@@ -1,6 +1,6 @@
 /**
  * ==========================================================
- *  server_v1.2.2_corsFix.js
+ *  server_v1.2.3_corsFix.js
  *  ✅ CORS設定修正版（Kintoneドメイン明示）
  *  ✅ Render環境での gpt-5 エラー完全回避
  *  ✅ モデル名正規化・フォールバック安全化
@@ -197,7 +197,7 @@ app.post("/persona/update", async (req, res) => {
 // ----------------------------------------------------------
 app.post("/assist/thread-chat", async (req, res) => {
   try {
-    const { chatRecordId, message, documentId, model } = req.body;
+    const { chatRecordId, message, documentId, fileKey, fileName, model } = req.body;
     if (!chatRecordId) return res.status(400).json({ error: "chatRecordId is required" });
 
     const CHAT_APP_ID = process.env.KINTONE_CHAT_APP_ID;
@@ -206,7 +206,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     const DOC_TOKEN   = process.env.KINTONE_DOCUMENT_TOKEN;
 
     const selectedModel = normalizeModel(model || "gpt-4o-mini");
-    console.log("💬 /assist/thread-chat:", { chatRecordId, selectedModel });
+    console.log("💬 /assist/thread-chat:", { chatRecordId, selectedModel, fileKey });
 
     const chats = await kGetRecords(CHAT_APP_ID, CHAT_TOKEN, `$id = ${chatRecordId}`);
     if (chats.length === 0) throw new Error("Chat record not found");
@@ -247,11 +247,35 @@ app.post("/assist/thread-chat", async (req, res) => {
       await kUpdateRecord(CHAT_APP_ID, CHAT_TOKEN, chat.$id.value, { vector_store_id: { value: vectorStoreId } });
     }
 
+    // ----------------------------------------------------------
+    // 🔹 資料 fileKey を使用して KINTONE_DOCUMENT_TOKEN でダウンロード
+    // ----------------------------------------------------------
+    if (fileKey && DOC_TOKEN) {
+      console.log("📎 Downloading file via DOC_TOKEN:", fileKey);
+      const buffer = await kDownloadFile(fileKey, DOC_TOKEN);
+      if (!buffer || buffer.byteLength === 0) {
+        console.warn("⚠️ Empty file buffer, cannot process.");
+        return res.json({ reply: `申し訳ございませんが、資料「${fileName}」を見つけることができませんでした。` });
+      }
+
+      const tmpPath = path.join(os.tmpdir(), fileName);
+      fs.writeFileSync(tmpPath, Buffer.from(buffer));
+      const uploaded = await client.files.create({
+        file: fs.createReadStream(tmpPath),
+        purpose: "assistants"
+      });
+
+      await VS.files.create(vectorStoreId, { file_id: uploaded.id });
+      console.log(`✅ File uploaded to OpenAI: ${fileName}`);
+    }
+
+    // ----------------------------------------------------------
+    // 🔹 通常チャット処理（Run実行）
+    // ----------------------------------------------------------
     if (message && message.trim()) {
       await T.messages.create(threadId, { role: "user", content: message });
     }
 
-    // ---- Run実行（フォールバック付き）----
     const safeModel = resolveSafeModel(params.model);
     let run;
     try {
@@ -280,9 +304,9 @@ app.post("/assist/thread-chat", async (req, res) => {
 
     const msgs = await T.messages.list(threadId, { order: "desc", limit: 1 });
     let reply = msgs.data[0]?.content?.[0]?.text?.value || "（返答なし）";
-    
     const htmlReply = DOMPurify.sanitize(marked.parse(reply));
 
+    // ---- チャットログ保存 ----
     const newRow = {
       value: {
         user_message: { value: message },
@@ -300,6 +324,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 
 // ----------------------------------------------------------
 app.get("/", (req, res) => res.send("✅ Server alive (Safe Model Mode active)"));
