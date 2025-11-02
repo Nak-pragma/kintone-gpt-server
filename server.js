@@ -1,11 +1,13 @@
 /**
  * ==========================================================
- *  server_v1.2.1_safe-model.js
+ *  server_v1.2.2_corsFix.js
+ *  ✅ CORS設定修正版（Kintoneドメイン明示）
  *  ✅ Render環境での gpt-5 エラー完全回避
  *  ✅ モデル名正規化・フォールバック安全化
  *  ✅ 「ノア」人格構造 / Webスタイル応答は維持
  * ==========================================================
  */
+
 import express from "express";
 import fetch from "node-fetch";
 import OpenAI from "openai";
@@ -21,7 +23,32 @@ console.log("✅ OpenAI SDK version:", pkg.version);
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use(cors());
+
+// ----------------------------------------------------------
+// CORS設定（Kintoneドメイン明示）
+// ----------------------------------------------------------
+const allowedOrigins = [
+  "https://yypvezlz36e3.cybozu.com", // ← タツ様のKintoneドメイン
+  "https://kintone-gpt-server-qpwl.onrender.com" // 自サーバーも許可
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn("❌ Blocked by CORS:", origin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Cybozu-API-Token"],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
+  })
+);
 
 // ----------------------------------------------------------
 // 起動時準備
