@@ -113,8 +113,8 @@ function normalizeModel(name = "") {
 function resolveSafeModel(model) {
   const m = normalizeModel(model);
   if (ALLOWED_MODELS.has(m)) return m;
-  console.warn(`⚠️ Model "${model}" not allowed. Using fallback "gpt-4o-mini"`);
-  return "gpt-4o-mini";
+  console.warn(`⚠️ Model "${model}" not allowed. Using fallback "gpt-4o"`);
+  return "gpt-4o";
 }
 
 // ----------------------------------------------------------
@@ -167,7 +167,7 @@ app.post("/persona/update", async (req, res) => {
       name: p.persona_name?.value || "Noa",
       instructions: p.instructions?.value || defaultNoaInstructions(),
       params: {
-        model: normalizeModel(p.model?.value || "gpt-4o-mini"),
+        model: normalizeModel(p.model?.value || "gpt-4o"),
         temperature: Number(p.temperature?.value ?? 0.7),
         top_p: Number(p.top_p?.value ?? 1.0),
         presence_penalty: Number(p.presence_penalty?.value ?? 0.3),
@@ -205,7 +205,7 @@ app.post("/assist/thread-chat", async (req, res) => {
     const DOC_APP_ID  = process.env.KINTONE_DOCUMENT_APP_ID;
     const DOC_TOKEN   = process.env.KINTONE_DOCUMENT_TOKEN;
 
-    const selectedModel = normalizeModel(model || "gpt-4o-mini");
+    const selectedModel = normalizeModel(model || "gpt-4o");
     console.log("💬 /assist/thread-chat:", { chatRecordId, selectedModel, fileKey });
 
     const chats = await kGetRecords(CHAT_APP_ID, CHAT_TOKEN, `$id = ${chatRecordId}`);
