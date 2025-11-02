@@ -1,6 +1,6 @@
 /**
  * ==========================================================
- *  server_v1.2.3_corsFix.js
+ *  server_v1.2.4.js
  *  ✅ CORS設定修正版（Kintoneドメイン明示）
  *  ✅ Render環境での gpt-5 エラー完全回避
  *  ✅ モデル名正規化・フォールバック安全化
@@ -251,23 +251,28 @@ app.post("/assist/thread-chat", async (req, res) => {
     // 🔹 資料 fileKey を使用して KINTONE_DOCUMENT_TOKEN でダウンロード
     // ----------------------------------------------------------
     if (fileKey && DOC_TOKEN) {
-      console.log("📎 Downloading file via DOC_TOKEN:", fileKey);
-      const buffer = await kDownloadFile(fileKey, DOC_TOKEN);
-      if (!buffer || buffer.byteLength === 0) {
-        console.warn("⚠️ Empty file buffer, cannot process.");
-        return res.json({ reply: `申し訳ございませんが、資料「${fileName}」を見つけることができませんでした。` });
-      }
+  console.log("📎 Downloading file via DOC_TOKEN:", fileKey);
+  const buffer = await kDownloadFile(fileKey, DOC_TOKEN);
 
-      const tmpPath = path.join(os.tmpdir(), fileName);
-      fs.writeFileSync(tmpPath, Buffer.from(buffer));
-      const uploaded = await client.files.create({
-        file: fs.createReadStream(tmpPath),
-        purpose: "assistants"
-      });
+  if (!buffer) {
+    console.warn("⚠️ File buffer missing");
+  } else {
+    const tmpPath = path.join(os.tmpdir(), fileName);
+    fs.writeFileSync(tmpPath, Buffer.from(buffer));
+    const uploaded = await client.files.create({
+      file: fs.createReadStream(tmpPath),
+      purpose: "assistants"
+    });
 
+    if (!uploaded?.id) {
+      console.warn("⚠️ Upload result invalid:", uploaded);
+    } else {
       await VS.files.create(vectorStoreId, { file_id: uploaded.id });
-      console.log(`✅ File uploaded to OpenAI: ${fileName}`);
+      console.log(`✅ File uploaded and registered: ${fileName}`);
     }
+  }
+}
+
 
     // ----------------------------------------------------------
     // 🔹 通常チャット処理（Run実行）
