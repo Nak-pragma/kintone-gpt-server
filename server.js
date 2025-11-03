@@ -22,6 +22,7 @@ const pkg = JSON.parse(fs.readFileSync("./node_modules/openai/package.json", "ut
 console.log("✅ OpenAI SDK version:", pkg.version);
 
 const app = express();
+app.use(express.static("public"));
 app.use(express.json({ limit: "20mb" }));
 
 // ----------------------------------------------------------
